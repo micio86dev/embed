@@ -92,6 +92,15 @@ export class BeaiEmbed {
   private mounted = false;
   private destroyed = false;
   private ready = false;
+  /**
+   * Set once `handleReadyTimeout()` has already told the host the embed is unreachable
+   * (gga round 4, non-blocking note): without this, a `ready` that arrives AFTER that
+   * error — late, but not impossible — would still queue-flush `start()` and proceed as if
+   * nothing had gone wrong, directly contradicting the `recoverable: false` error the host
+   * was just given. Once timed out, this instance never starts; the host's own recovery
+   * path is `destroy()` and a fresh `mount()`.
+   */
+  private timedOut = false;
   private pendingStart = false;
   private readyTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -270,6 +279,7 @@ export class BeaiEmbed {
     this.readyTimeoutId = null;
     if (this.ready || this.destroyed) return;
 
+    this.timedOut = true;
     const payload: ErrorPayload = {
       code: "embed_unreachable",
       message: `The embed iframe did not report ready within ${READY_TIMEOUT_MS}ms.`,
@@ -309,6 +319,10 @@ export class BeaiEmbed {
 
   private processIncomingEvent(type: IncomingEventType, payload: unknown): void {
     if (type === "ready") {
+      // A late ready after the timeout already fired never proceeds (see `timedOut`'s own
+      // doc) — the host was already told, with `recoverable: false`, that this embed
+      // failed. Silently starting anyway would contradict that.
+      if (this.timedOut) return;
       this.ready = true;
       this.clearReadyTimeout();
       // The SDK's job is only to relay `set-theme`; the org's white-label flag gates

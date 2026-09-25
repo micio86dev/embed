@@ -64,4 +64,23 @@ describe("ready timeout", () => {
 
     expect(onError).not.toHaveBeenCalled();
   });
+
+  it("ignores a late ready that arrives after the timeout already fired", () => {
+    // gga round 4, non-blocking note: without the `timedOut` guard, this ready would
+    // still queue-flush start() — directly contradicting the recoverable: false error
+    // the host was already given.
+    container = createContainer();
+    const onError = vi.fn();
+    const onReady = vi.fn();
+    stubIframeContentWindow();
+    const instance = BEAI.mount(baseOptions(container, { onError, onReady }));
+
+    vi.advanceTimersByTime(READY_TIMEOUT_MS);
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    dispatchEmbedMessage(TEST_EMBED_ORIGIN, beaiEmbedMessage("ready"));
+
+    expect(onReady).not.toHaveBeenCalled();
+    instance.destroy();
+  });
 });
