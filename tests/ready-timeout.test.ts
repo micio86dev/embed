@@ -65,15 +65,17 @@ describe("ready timeout", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it("ignores a late ready that arrives after the timeout already fired", () => {
-    // gga round 4, non-blocking note: without the `timedOut` guard, this ready would
-    // still queue-flush start() — directly contradicting the recoverable: false error
-    // the host was already given.
+  it("ignores a late ready that arrives after the timeout already fired, and never sends the queued start()", () => {
+    // gga round 4/5: without the `timedOut` guard, this ready would still queue-flush
+    // start() — directly contradicting the recoverable: false error the host was already
+    // given. Asserting on postMessage, not just onReady, is what actually proves a
+    // candidate's interview never starts on an embed the host was told had failed.
     container = createContainer();
     const onError = vi.fn();
     const onReady = vi.fn();
-    stubIframeContentWindow();
+    const { postMessage } = stubIframeContentWindow();
     const instance = BEAI.mount(baseOptions(container, { onError, onReady }));
+    instance.start();
 
     vi.advanceTimersByTime(READY_TIMEOUT_MS);
     expect(onError).toHaveBeenCalledTimes(1);
@@ -81,6 +83,8 @@ describe("ready timeout", () => {
     dispatchEmbedMessage(TEST_EMBED_ORIGIN, beaiEmbedMessage("ready"));
 
     expect(onReady).not.toHaveBeenCalled();
+    const startCalls = postMessage.mock.calls.filter((call) => call[0].type === "start");
+    expect(startCalls).toHaveLength(0);
     instance.destroy();
   });
 });
