@@ -71,6 +71,34 @@ export function stubIframeContentWindow() {
 }
 
 /**
+ * jsdom's ORIGINAL `contentWindow` descriptor, captured once at module load — before any
+ * test has had a chance to call `stubIframeContentWindow()` and overwrite it.
+ */
+const originalContentWindowDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLIFrameElement.prototype,
+  "contentWindow",
+);
+
+/**
+ * Restores `HTMLIFrameElement.prototype.contentWindow` to jsdom's own descriptor and
+ * clears `currentFakeIframeWindow` (gga round 3, finding R3-003): without this, a test
+ * that never calls `stubIframeContentWindow()` itself silently inherited whichever fake
+ * window an EARLIER test in the same file installed, making that test's behavior depend on
+ * execution order. Called from `tests/setup.ts`'s global `afterEach` — every test gets a
+ * clean slate, not just the ones that remembered to call it themselves.
+ */
+export function resetIframeContentWindowStub(): void {
+  if (originalContentWindowDescriptor) {
+    Object.defineProperty(
+      HTMLIFrameElement.prototype,
+      "contentWindow",
+      originalContentWindowDescriptor,
+    );
+  }
+  currentFakeIframeWindow = null;
+}
+
+/**
  * Dispatches a fake `message` event on `window`, as if sent by the embed iframe. `source`
  * defaults to the most recent `stubIframeContentWindow()` call's fake window, matching
  * `BeaiEmbed`'s own cross-talk guard (`event.source !== this.iframe?.contentWindow`) — most

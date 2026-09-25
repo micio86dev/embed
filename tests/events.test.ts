@@ -149,4 +149,63 @@ describe("event dispatch: on*() callbacks and .on() listeners coexist", () => {
 
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it("a throwing onCompleted callback does not stop a .on('completed') listener from running", () => {
+    // gga round 3, findings R4-callback-isolation/R3-001: without per-handler isolation,
+    // this listener would never run — the docs claim the two delivery paths "coexist
+    // independently", which was untrue before this fix.
+    container = createContainer();
+    const onCompletedViaOn = vi.fn();
+    stubIframeContentWindow();
+    const instance = BEAI.mount(
+      baseOptions(container, {
+        onCompleted: () => {
+          throw new Error("host bug");
+        },
+      }),
+    );
+    instance.on("completed", onCompletedViaOn);
+
+    expect(() =>
+      dispatchEmbedMessage(
+        TEST_EMBED_ORIGIN,
+        beaiEmbedMessage("completed", { interviewId: "iv-3" }),
+      ),
+    ).not.toThrow();
+
+    expect(onCompletedViaOn).toHaveBeenCalledWith({ interviewId: "iv-3" });
+    instance.destroy();
+  });
+
+  it("a throwing .on() listener does not stop a LATER listener for the same event from running", () => {
+    container = createContainer();
+    const throwingListener = vi.fn(() => {
+      throw new Error("consumer bug");
+    });
+    const laterListener = vi.fn();
+    stubIframeContentWindow();
+    const instance = BEAI.mount(baseOptions(container));
+    instance.on("started", throwingListener);
+    instance.on("started", laterListener);
+
+    dispatchEmbedMessage(TEST_EMBED_ORIGIN, beaiEmbedMessage("started"));
+
+    expect(throwingListener).toHaveBeenCalled();
+    expect(laterListener).toHaveBeenCalled();
+    instance.destroy();
+  });
+
+  it("a throwing onDestroyed callback does not propagate out of destroy() itself", () => {
+    container = createContainer();
+    stubIframeContentWindow();
+    const instance = BEAI.mount(
+      baseOptions(container, {
+        onDestroyed: () => {
+          throw new Error("host bug in onDestroyed");
+        },
+      }),
+    );
+
+    expect(() => instance.destroy()).not.toThrow();
+  });
 });

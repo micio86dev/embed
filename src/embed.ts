@@ -22,6 +22,16 @@ import {
  */
 export const DEFAULT_EMBED_ORIGIN = "https://embed.beai.example";
 
+/**
+ * How long `mount()` waits for the iframe's `ready` message before giving up (gga round 3,
+ * finding R4-ready-no-timeout). Without this, a host down, a CSP `frame-src` block, a
+ * network failure, or simply a wrong `embedOrigin` left `start()` queued FOREVER with no
+ * `onError` ever firing — nothing told the host the interview never loaded. Not
+ * configurable via `MountOptions` (SPEC §4.2 doesn't name a `readyTimeoutMs` option); a
+ * fixed, generous value is the smallest fix that actually surfaces the failure.
+ */
+export const READY_TIMEOUT_MS = 15_000;
+
 export interface MountOptions {
   /** Selector or element the iframe is appended into. */
   container: HTMLElement | string;
@@ -83,6 +93,7 @@ export class BeaiEmbed {
   private destroyed = false;
   private ready = false;
   private pendingStart = false;
+  private readyTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(options: MountOptions) {
     this.options = options;
@@ -92,7 +103,20 @@ export class BeaiEmbed {
     // `event.origin !== this.embedOrigin` comparison would then silently fail forever,
     // `ready` would never arrive, and a queued start() would never go out. Normalizing
     // once here, not per-comparison, fixes every call site at once.
-    const embedOrigin = new URL(options.embedOrigin ?? DEFAULT_EMBED_ORIGIN).origin;
+    // try/catch → typed error (gga round 3, finding R3-002): a bare hostname with no
+    // scheme ("embed.beai.com") makes new URL() throw a native TypeError, a different
+    // error type than the opaque-origin case below even though both are the same class of
+    // programmer misuse — BeaiEmbedError's own doc promises ALL programmer-facing misuse
+    // surfaces through it.
+    let embedOrigin: string;
+    try {
+      embedOrigin = new URL(options.embedOrigin ?? DEFAULT_EMBED_ORIGIN).origin;
+    } catch {
+      throw new BeaiEmbedError(
+        "invalid_embed_origin",
+        `embedOrigin "${options.embedOrigin}" is not a valid URL.`,
+      );
+    }
     // Reject an opaque origin (gga finding, round 2, non-blocking): a `file:`/`data:`
     // embedOrigin resolves to the literal string "null", which would then match ANY
     // opaque-origin iframe's `event.origin` — not just this SDK's own. `event.source`
@@ -133,6 +157,10 @@ export class BeaiEmbed {
 
     this.messageListener = (event: MessageEvent): void => this.handleMessage(event);
     window.addEventListener("message", this.messageListener);
+
+    // See READY_TIMEOUT_MS's own doc — cleared the moment `ready` arrives
+    // (processIncomingEvent) or the instance is destroyed.
+    this.readyTimeoutId = setTimeout(() => this.handleReadyTimeout(), READY_TIMEOUT_MS);
 
     this.mounted = true;
     return this;
@@ -197,6 +225,8 @@ export class BeaiEmbed {
     if (this.destroyed) return;
     this.destroyed = true;
 
+    this.clearReadyTimeout();
+
     if (this.messageListener) {
       window.removeEventListener("message", this.messageListener);
       this.messageListener = null;
@@ -217,6 +247,35 @@ export class BeaiEmbed {
         "This BEAI embed instance has already been destroyed.",
       );
     }
+  }
+
+  private clearReadyTimeout(): void {
+    if (this.readyTimeoutId !== null) {
+      clearTimeout(this.readyTimeoutId);
+      this.readyTimeoutId = null;
+    }
+  }
+
+  /**
+   * See READY_TIMEOUT_MS's own doc. Fires the SAME "error" event real iframe-emitted
+   * errors use (SPEC §4.3's ErrorPayload shape), through both delivery paths (`onError`
+   * and `.on('error')`) — a host that only listens for iframe-originated errors still
+   * hears about this one, since from the host's point of view "the interview never loaded"
+   * is the same class of failure regardless of WHERE it was detected. `code:
+   * "embed_unreachable"` is an SDK-synthesized code, not one of SPEC §4.3's iframe-emitted
+   * codes (`origin_not_allowed`, `cookie_blocked`, etc.) — this failure was never sent BY
+   * the iframe, since the iframe never loaded far enough to send anything.
+   */
+  private handleReadyTimeout(): void {
+    this.readyTimeoutId = null;
+    if (this.ready || this.destroyed) return;
+
+    const payload: ErrorPayload = {
+      code: "embed_unreachable",
+      message: `The embed iframe did not report ready within ${READY_TIMEOUT_MS}ms.`,
+      recoverable: false,
+    };
+    this.dispatch("error", payload);
   }
 
   private postToIframe(type: OutgoingMessageType, payload?: unknown): void {
@@ -251,6 +310,7 @@ export class BeaiEmbed {
   private processIncomingEvent(type: IncomingEventType, payload: unknown): void {
     if (type === "ready") {
       this.ready = true;
+      this.clearReadyTimeout();
       // The SDK's job is only to relay `set-theme`; the org's white-label flag gates
       // whether it's actually applied, and that gating happens iframe-side (SPEC §4.2:
       // "only applied if org white-label allows"). Never move that decision into this
@@ -266,16 +326,35 @@ export class BeaiEmbed {
 
     if (type === "resize") {
       const height = (payload as { height?: unknown } | undefined)?.height;
-      // Number.isFinite() (gga finding, non-blocking) — a bare `typeof height === "number"`
-      // still lets NaN, Infinity and negative values through to a DOM write.
-      if (typeof height === "number" && Number.isFinite(height) && height >= 0 && this.iframe) {
+      // Number.isFinite() (gga finding) — a bare `typeof height === "number"` still lets
+      // NaN, Infinity and negative values through to a DOM write.
+      const validHeight = typeof height === "number" && Number.isFinite(height) && height >= 0;
+      if (validHeight && this.iframe) {
         this.iframe.style.height = `${height}px`;
       }
+      // Skip dispatch entirely for an invalid payload (gga round 3, finding
+      // R2-resize-payload-type): the DOM write was already guarded, but a `.on('resize')`
+      // listener received the SAME unvalidated payload regardless — typed as
+      // `ResizePayload` (`{ height: number }`) while actually possibly NaN, negative, or a
+      // string. A listener has no reason to see a payload the SDK itself refused to act on.
+      if (!validHeight) return;
     }
 
     this.dispatch(type, payload as EventPayloadMap[typeof type]);
   }
 
+  /**
+   * Each handler (the `on<Event>` mount callback and every `.on()` listener) runs inside
+   * its OWN try/catch (gga round 3, finding R4-callback-isolation/R3-001): without this,
+   * a throwing `onCompleted` would skip every `.on('completed')` listener registered after
+   * it — the two delivery paths this class's own docs promise "coexist independently" did
+   * not, in practice, survive one consumer's bug. For the `destroyed` event specifically, an
+   * uncaught exception here would also propagate OUT of `destroy()` itself, leaving cleanup
+   * (the iframe removal, the listener teardown) already done but the caller seeing a thrown
+   * `destroy()` call. A caught handler exception is logged, never rethrown or swallowed
+   * silently — `console.error` is the same visibility level `dom.ts`'s own container-lookup
+   * failure gets, just non-fatal here since it is the HOST's bug, not this SDK's.
+   */
   private dispatch<T extends EmbedEventType>(event: T, payload: EventPayloadMap[T]): void {
     if (hasCallback(event)) {
       const callbackName = EVENT_TO_CALLBACK[event];
@@ -283,14 +362,24 @@ export class BeaiEmbed {
       // signature, so a dynamic lookup by key can't be expressed without one.
       const callback = this.options[callbackName] as
         ((payload: EventPayloadMap[T]) => void) | undefined;
-      callback?.(payload);
+      this.invokeSafely(() => callback?.(payload));
     }
 
     const listenersForEvent = this.listeners.get(event);
     if (listenersForEvent) {
       for (const listener of listenersForEvent) {
-        (listener as Listener<T>)(payload);
+        this.invokeSafely(() => (listener as Listener<T>)(payload));
       }
+    }
+  }
+
+  private invokeSafely(fn: () => void): void {
+    try {
+      fn();
+    } catch (error) {
+      // The one place a host's own handler bug is surfaced without breaking every OTHER
+      // handler for the same event.
+      console.error("@beai/embed: a host event handler threw", error);
     }
   }
 }

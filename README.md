@@ -2,8 +2,8 @@
 
 `@beai/embed` — the TypeScript client customer sites load to embed a BEAI interview. Zero
 runtime dependencies, ≤ 12 KB gzipped. Ships as ESM (`import { BEAI } from "@beai/embed"`)
-and as a UMD/IIFE bundle for `<script src="https://cdn.beai.example/embed/v1.js">`,
-exposing `window.BEAI`.
+and as an IIFE bundle for `<script src="https://cdn.beai.example/embed/v1.js">`, exposing
+`window.BEAI`.
 
 > **Bun only.** Bun is the sole package manager here: install, dev and build. Node runs the
 > Vitest/Playwright runners only, matching `frontend`/`backoffice`.
