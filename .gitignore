@@ -1,0 +1,19 @@
+# Build outputs
+dist
+coverage
+
+# Node dependencies
+node_modules
+
+# Logs
+logs
+*.log
+
+# Playwright
+playwright-report
+test-results
+
+# Misc
+.DS_Store
+.fleet
+.idea
