@@ -1,5 +1,6 @@
 /** Stable, typed error codes this package throws. */
-export type BeaiEmbedErrorCode = "container_not_found" | "instance_destroyed";
+export type BeaiEmbedErrorCode =
+  "container_not_found" | "instance_destroyed" | "invalid_embed_origin";
 
 /**
  * Typed error thrown for programmer-facing misuse (bad container selector, calling a

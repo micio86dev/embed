@@ -58,4 +58,15 @@ describe("embedOrigin defaults", () => {
     expect(onReady).toHaveBeenCalledTimes(1);
     instance.destroy();
   });
+
+  it("throws for an opaque-origin embedOrigin instead of silently matching any opaque-origin iframe", () => {
+    // gga finding, round 2 (non-blocking): a file:/data: embedOrigin resolves to the
+    // literal string "null" from new URL(...).origin, which would then match ANY
+    // opaque-origin iframe's event.origin, not just this SDK's own.
+    container = createContainer();
+
+    expect(() => BEAI.mount({ container, token: "tok", embedOrigin: "data:text/html,hi" })).toThrow(
+      /opaque origin/,
+    );
+  });
 });

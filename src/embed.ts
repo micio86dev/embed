@@ -92,7 +92,19 @@ export class BeaiEmbed {
     // `event.origin !== this.embedOrigin` comparison would then silently fail forever,
     // `ready` would never arrive, and a queued start() would never go out. Normalizing
     // once here, not per-comparison, fixes every call site at once.
-    this.embedOrigin = new URL(options.embedOrigin ?? DEFAULT_EMBED_ORIGIN).origin;
+    const embedOrigin = new URL(options.embedOrigin ?? DEFAULT_EMBED_ORIGIN).origin;
+    // Reject an opaque origin (gga finding, round 2, non-blocking): a `file:`/`data:`
+    // embedOrigin resolves to the literal string "null", which would then match ANY
+    // opaque-origin iframe's `event.origin` — not just this SDK's own. `event.source`
+    // still blocks a forged message, but there's no reason to accept a configuration that
+    // weakens the FIRST check silently instead of refusing it outright.
+    if (embedOrigin === "null") {
+      throw new BeaiEmbedError(
+        "invalid_embed_origin",
+        `embedOrigin "${options.embedOrigin}" resolves to an opaque origin ("null"), which would match any opaque-origin iframe. Use an http(s) origin.`,
+      );
+    }
+    this.embedOrigin = embedOrigin;
   }
 
   /** Creates a new instance and mounts it immediately — the `BEAI.mount()` factory shape. */
