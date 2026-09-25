@@ -41,4 +41,24 @@ describe("resize auto-height", () => {
     expect(listener).toHaveBeenCalledWith({ height: 620 });
     instance.destroy();
   });
+
+  it.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["a negative number", -10],
+    ["a string", "480"],
+  ])("never writes style.height for an invalid resize payload (%s)", (_label, height) => {
+    // gga finding (non-blocking): proves Number.isFinite()/>= 0 actually reject these —
+    // removing either guard would go unnoticed without this test.
+    container = createContainer();
+    stubIframeContentWindow();
+    const instance = BEAI.mount(baseOptions(container));
+    const iframe = getIframe(container);
+    iframe.style.height = "";
+
+    dispatchEmbedMessage(TEST_EMBED_ORIGIN, beaiEmbedMessage("resize", { height }));
+
+    expect(iframe.style.height).toBe("");
+    instance.destroy();
+  });
 });

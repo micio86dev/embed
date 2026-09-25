@@ -86,7 +86,13 @@ export class BeaiEmbed {
 
   private constructor(options: MountOptions) {
     this.options = options;
-    this.embedOrigin = options.embedOrigin ?? DEFAULT_EMBED_ORIGIN;
+    // new URL(...).origin (gga finding, non-blocking): "https://embed.x/" (a trailing
+    // slash) is a perfectly normal way to write the origin, but event.origin from a real
+    // browser postMessage event is NEVER trailing-slashed — every subsequent
+    // `event.origin !== this.embedOrigin` comparison would then silently fail forever,
+    // `ready` would never arrive, and a queued start() would never go out. Normalizing
+    // once here, not per-comparison, fixes every call site at once.
+    this.embedOrigin = new URL(options.embedOrigin ?? DEFAULT_EMBED_ORIGIN).origin;
   }
 
   /** Creates a new instance and mounts it immediately — the `BEAI.mount()` factory shape. */

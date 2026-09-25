@@ -40,6 +40,23 @@ describe("postMessage origin validation (both directions)", () => {
     instance.destroy();
   });
 
+  it("ignores a same-origin message whose event.source is not this instance's own iframe", () => {
+    // gga finding (non-blocking): a same-origin check alone can't tell two embeds on the
+    // same page apart — this proves the window-identity check specifically, distinct from
+    // the "wrong source" test below (which is about the protocol envelope's data.source
+    // string field, not event.source).
+    container = createContainer();
+    const onReady = vi.fn();
+    stubIframeContentWindow();
+    const instance = BEAI.mount(baseOptions(container, { onReady }));
+    const unrelatedWindow = { postMessage: vi.fn() } as unknown as Window;
+
+    dispatchEmbedMessage(TEST_EMBED_ORIGIN, beaiEmbedMessage("ready"), unrelatedWindow);
+
+    expect(onReady).not.toHaveBeenCalled();
+    instance.destroy();
+  });
+
   it("ignores a message with the right origin but wrong source", () => {
     container = createContainer();
     const onReady = vi.fn();

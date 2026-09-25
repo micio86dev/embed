@@ -1,6 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BEAI, DEFAULT_EMBED_ORIGIN } from "../src/index";
-import { createContainer, getIframe } from "./test-utils";
+import {
+  beaiEmbedMessage,
+  createContainer,
+  dispatchEmbedMessage,
+  getIframe,
+  stubIframeContentWindow,
+} from "./test-utils";
 
 describe("embedOrigin defaults", () => {
   let container: HTMLElement;
@@ -16,6 +22,40 @@ describe("embedOrigin defaults", () => {
 
     expect(iframe.src).toBe(`${DEFAULT_EMBED_ORIGIN}/embed/tok`);
 
+    instance.destroy();
+  });
+
+  it("normalizes a trailing-slash embedOrigin so iframe src construction is unaffected", () => {
+    container = createContainer();
+    const instance = BEAI.mount({
+      container,
+      token: "tok",
+      embedOrigin: "https://embed.trailing-slash.test/",
+    });
+    const iframe = getIframe(container);
+
+    expect(iframe.src).toBe("https://embed.trailing-slash.test/embed/tok");
+
+    instance.destroy();
+  });
+
+  it("normalizes a trailing-slash embedOrigin so postMessage origin comparison still matches", () => {
+    // gga finding (non-blocking): a real browser's event.origin is NEVER
+    // trailing-slashed. Without normalizing embedOrigin, every comparison against
+    // "https://embed.trailing-slash.test/" would silently fail forever.
+    container = createContainer();
+    const onReady = vi.fn();
+    stubIframeContentWindow();
+    const instance = BEAI.mount({
+      container,
+      token: "tok",
+      embedOrigin: "https://embed.trailing-slash.test/",
+      onReady,
+    });
+
+    dispatchEmbedMessage("https://embed.trailing-slash.test", beaiEmbedMessage("ready"));
+
+    expect(onReady).toHaveBeenCalledTimes(1);
     instance.destroy();
   });
 });
