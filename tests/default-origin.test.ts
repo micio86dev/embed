@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BEAI, DEFAULT_EMBED_ORIGIN } from "../src/index";
+import { BEAI, BeaiEmbedError, DEFAULT_EMBED_ORIGIN } from "../src/index";
 import {
   beaiEmbedMessage,
   createContainer,
@@ -68,5 +68,22 @@ describe("embedOrigin defaults", () => {
     expect(() => BEAI.mount({ container, token: "tok", embedOrigin: "data:text/html,hi" })).toThrow(
       /opaque origin/,
     );
+  });
+
+  it("throws a typed BeaiEmbedError (not a native TypeError) for a scheme-less embedOrigin", () => {
+    // gga round 6, finding R3-002: new URL() throws a plain TypeError for a bare hostname
+    // with no scheme ("embed.beai.com") — this proves the try/catch actually converts it
+    // to the SAME typed error the opaque-origin case above uses.
+    container = createContainer();
+
+    let caught: unknown;
+    try {
+      BEAI.mount({ container, token: "tok", embedOrigin: "embed.beai.example" });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(BeaiEmbedError);
+    expect((caught as BeaiEmbedError).code).toBe("invalid_embed_origin");
   });
 });

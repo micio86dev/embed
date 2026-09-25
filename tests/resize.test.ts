@@ -61,4 +61,20 @@ describe("resize auto-height", () => {
     expect(iframe.style.height).toBe("");
     instance.destroy();
   });
+
+  it("never notifies a .on('resize') listener for an invalid payload either", () => {
+    // gga round 6, finding R3-001: the DOM-write guard above and the dispatch-skip guard
+    // in processIncomingEvent() are two SEPARATE checks — this proves the listener side
+    // specifically, not just that the DOM write was skipped.
+    container = createContainer();
+    stubIframeContentWindow();
+    const instance = BEAI.mount(baseOptions(container));
+    const listener = vi.fn();
+    instance.on("resize", listener);
+
+    dispatchEmbedMessage(TEST_EMBED_ORIGIN, beaiEmbedMessage("resize", { height: Number.NaN }));
+
+    expect(listener).not.toHaveBeenCalled();
+    instance.destroy();
+  });
 });
