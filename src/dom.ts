@@ -30,6 +30,11 @@ export function createIframeElement(src: string): HTMLIFrameElement {
   // Set as an attribute (not the `.allow` IDL property) — jsdom's HTMLIFrameElement does
   // not reflect `.allow` to the DOM attribute, and the attribute is what browsers read.
   iframe.setAttribute("allow", "camera; microphone; autoplay");
+  // Defensive: `src` carries the single-use session token (see buildIframeSrc). The
+  // hosted app exchanges it for an httpOnly cookie on first load, but this closes the
+  // narrow window where a Referer header on that first request could otherwise leak
+  // the token to whatever the iframe's own initial navigation touches.
+  iframe.setAttribute("referrerpolicy", "no-referrer");
   iframe.title = "BEAI interview";
   return iframe;
 }

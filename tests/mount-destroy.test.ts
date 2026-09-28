@@ -55,6 +55,16 @@ describe("mount/destroy idempotency", () => {
     instance.destroy();
   });
 
+  it("sets referrerpolicy to no-referrer, defensively against the session token in the src leaking via Referer", () => {
+    container = createContainer();
+    const instance = BEAI.mount(baseOptions(container));
+    const iframe = getIframe(container);
+
+    expect(iframe.getAttribute("referrerpolicy")).toBe("no-referrer");
+
+    instance.destroy();
+  });
+
   it("calling mount() again on an already-mounted instance is a no-op and never creates a second iframe", () => {
     container = createContainer();
     stubIframeContentWindow();
